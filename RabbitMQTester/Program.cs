@@ -11,8 +11,14 @@ namespace RabbitMQTester
 {
     public class Program
     {
-        static bool isProducer = true;
-        static bool isConsumer = true;
+        public static string HostName;
+        public static int Port;
+        public static string VirtualHost;
+        public static string MyQueue;
+        public static string ReceiveUser;
+        public static string ReceivePassword;
+        public static string SendUser;
+        public static string SendPassword;
 
         static Thread ProducerThread;
         static Thread ConsumerThread;
@@ -30,14 +36,25 @@ namespace RabbitMQTester
             AppThread.IsBackground = true;
             AppThread.Start();
 
-            if (isProducer)
+            // chain calls together as a fluent API
+            IConfigurationSection rabbitConfig = new ConfigurationBuilder().SetBasePath(Directory.GetCurrentDirectory()).AddJsonFile("props.json").Build().GetSection("RabbitMQ");
+            Program.HostName = rabbitConfig["host"];
+            Program.Port = Int32.Parse(rabbitConfig["port"]);
+            Program.VirtualHost = rabbitConfig["vHost"];
+            Program.MyQueue = rabbitConfig["queue"];
+            Program.SendUser = rabbitConfig["producerUsername"];
+            Program.SendPassword = rabbitConfig["producerPassword"];
+            Program.ReceiveUser = rabbitConfig["consumerUsername"];
+            Program.ReceivePassword = rabbitConfig["consumerPassword"];
+
+            if (Boolean.Parse(rabbitConfig["producer"]))
             {
                 ProducerThread = new Thread(() => { Send.Start(); });
                 ProducerThread.IsBackground = true;
                 ProducerThread.Start();
             }
 
-            if (isConsumer)
+            if (Boolean.Parse(rabbitConfig["consumer"]))
             {
                 ConsumerThread = new Thread(() => { Receive.Start(); });
                 ConsumerThread.IsBackground = true;
@@ -59,24 +76,17 @@ namespace RabbitMQTester
     class Connection
     {
 
-        static string HostName = "localhost";
-        static int Port = AmqpTcpEndpoint.UseDefaultPort;
-        static string VirtualHost = "";
-        public static string MyQueue = "";
-        public static string ReceiveUser = "";
-        public static string ReceivePassword = "";
-        public static string SendUser = "";
-        public static string SendPassword = "";
-        
         public static IModel Connect(string username, string password)
         {
             var factory = new ConnectionFactory();
 
-            factory.HostName = HostName;
-            factory.Port = Port;
-            factory.VirtualHost = VirtualHost;
+            factory.HostName = Program.HostName;
+            factory.Port = Program.Port;
+            factory.VirtualHost = Program.VirtualHost;
             factory.UserName = username;
             factory.Password = password;
+
+            //Console.WriteLine("Logging into: '{0}:{1}/{2}' with username: '{3}' and password '{4}'", Program.HostName, Program.Port, Program.VirtualHost, username, password);
 
             return factory.CreateConnection().CreateModel();
         }
@@ -90,12 +100,12 @@ namespace RabbitMQTester
         public static void Start()
         {
             Console.WriteLine("Starting Producer...");
-            Channel = Connection.Connect(Connection.SendUser, Connection.SendPassword);
+            Channel = Connection.Connect(Program.SendUser, Program.SendPassword);
             SendTimer = new Timer((args) =>
             {
                 Console.WriteLine("Publishing...");
                 Channel.BasicPublish(exchange: "",
-                    routingKey: Connection.MyQueue,
+                    routingKey: Program.MyQueue,
                     basicProperties: null,
                     body: Encoding.UTF8.GetBytes(string.Format("Test message: '{0}'", DateTime.Now.ToString("u"))));
             }, null, 0, 1000);
@@ -117,14 +127,14 @@ namespace RabbitMQTester
         public static void Start()
         {
             Console.WriteLine("Starting Consumer...");
-            Channel = Connection.Connect(Connection.ReceiveUser, Connection.ReceivePassword);
+            Channel = Connection.Connect(Program.ReceiveUser, Program.ReceivePassword);
             //ReceiveTimer = new Timer((args) => { Console.WriteLine("Consuming..."); }, null, 0, 1000);
             var consumer = new EventingBasicConsumer(Channel);
             consumer.Received += (m, ea) =>
             {
                 Console.WriteLine("   Received message: '{0}'", Encoding.UTF8.GetString(ea.Body));
             };
-            Channel.BasicConsume(queue: Connection.MyQueue, noAck: true, consumer: consumer);
+            Channel.BasicConsume(queue: Program.MyQueue, noAck: true, consumer: consumer);
         }
 
         public static void Stop()
